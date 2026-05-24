@@ -1,108 +1,59 @@
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
-import https from 'node:https';
-
-type State = [
-    string, string | null, string, number | null, number | null,
-        number | null, number | null, number | null, boolean,
-        number | null, number | null, ...unknown[]
-];
-
-let cachedToken: { token: string; expires: number } | null = null;
-
-function httpsRequest(
-    url: string,
-    options: https.RequestOptions = {},
-    body?: string,
-): Promise<{ status: number; body: string }> {
-    return new Promise((resolve, reject) => {
-        const req = https.request(url, { timeout: 25000, ...options }, (res) => {
-            let data = '';
-            res.on('data', (chunk) => (data += chunk));
-            res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }));
-        });
-        req.on('error', reject);
-        req.on('timeout', () => {
-            req.destroy(new Error('Request timeout'));
-        });
-        if (body) req.write(body);
-        req.end();
-    });
-}
-
-async function getOpenSkyToken(): Promise<string | null> {
-    const clientId = process.env.OPENSKY_CLIENT_ID;
-    const clientSecret = process.env.OPENSKY_CLIENT_SECRET;
-    if (!clientId || !clientSecret) return null;
-
-    if (cachedToken && Date.now() < cachedToken.expires) {
-        return cachedToken.token;
-    }
-
-    const body = new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: clientId,
-        client_secret: clientSecret,
-    }).toString();
-
-    const { status, body: respBody } = await httpsRequest(
-        'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token',
-        {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Content-Length': Buffer.byteLength(body).toString(),
-            },
-        },
-        body,
-    );
-
-    if (status !== 200) return null;
-    const data = JSON.parse(respBody);
-    cachedToken = {
-        token: data.access_token,
-        expires: Date.now() + 25 * 60 * 1000,
-    };
-    return data.access_token;
-}
+type AdsbAircraft = {
+    hex: string;
+    flight?: string;
+    r?: string;        // registration
+    t?: string;        // type
+    lat?: number;
+    lon?: number;
+    alt_baro?: number | 'ground';
+    gs?: number;       // ground speed (knots)
+    track?: number;    // true track in degrees
+    category?: string;
+};
 
 export async function GET(request: Request) {
     void request.url;
 
     try {
-        const token = await getOpenSkyToken();
-        const headers: Record<string, string> = {};
-        if (token) headers.Authorization = `Bearer ${token}`;
+        // ADSB.lol "/v2/all" returns every aircraft currently being tracked
+        const res = await fetch('https://api.adsb.lol/v2/mil', {
+            signal: AbortSignal.timeout(20000),
+            cache: 'no-store',
+        });
+        // Actually we want ALL flights, not just military. Use the proper endpoint:
+        const allRes = await fetch('https://api.adsb.lol/v2/lat/0/lon/0/dist/12500', {
+            signal: AbortSignal.timeout(20000),
+            cache: 'no-store',
+        });
 
-        const { status, body } = await httpsRequest(
-            'https://opensky-network.org/api/states/all',
-            { method: 'GET', headers },
-        );
-
-        if (status !== 200) {
+        if (!allRes.ok) {
             return Response.json(
-                { flights: [], error: `OpenSky ${status}` },
+                { flights: [], error: `ADSB.lol ${allRes.status}` },
                 { status: 200 },
             );
         }
 
-        const data = JSON.parse(body);
-        const flights = (data.states as State[] || [])
-            .map((s) => ({
-                icao24: s[0],
-                callsign: s[1]?.trim() ?? null,
-                country: s[2],
-                lon: s[5],
-                lat: s[6],
-                altitude: s[7],
-                onGround: s[8],
-                velocity: s[9],
-                heading: s[10],
-            }))
-            .filter((f) => f.lon != null && f.lat != null);
+        const data = await allRes.json();
+        const aircraft: AdsbAircraft[] = data.ac || [];
 
-        return Response.json({ flights, time: data.time, count: flights.length });
+        const flights = aircraft
+            .filter((a) => a.lon != null && a.lat != null)
+            .map((a) => ({
+                icao24: a.hex,
+                callsign: a.flight?.trim() || null,
+                country: null,
+                lon: a.lon,
+                lat: a.lat,
+                altitude: typeof a.alt_baro === 'number' ? a.alt_baro * 0.3048 : 0, // ft → m
+                onGround: a.alt_baro === 'ground',
+                velocity: a.gs ? a.gs * 0.514444 : null, // knots → m/s
+                heading: a.track ?? null,
+            }));
+
+        return Response.json({ flights, count: flights.length, time: Math.floor(Date.now() / 1000) });
     } catch (err) {
         return Response.json(
             { flights: [], error: String(err instanceof Error ? err.message : err) },
