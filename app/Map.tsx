@@ -21,6 +21,78 @@ export default function Map() {
 
         map.on('load', () => {
             map.setProjection({ type: 'globe' });
+
+            map.addSource('flights', {
+                type: 'geojson',
+                data: { type: 'FeatureCollection', features: [] },
+            });
+
+            map.addLayer({
+                id: 'flights-layer',
+                type: 'circle',
+                source: 'flights',
+                paint: {
+                    'circle-radius': 3,
+                    'circle-color': '#ff6b35',
+                    'circle-stroke-width': 0.5,
+                    'circle-stroke-color': '#fff',
+                },
+            });
+
+            const updateFlights = async () => {
+                try {
+                    const res = await fetch('/api/flights');
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const { flights } = await res.json();
+                    const features = flights.map((f: { lon: number; lat: number; [k: string]: unknown }) => ({
+                        type: 'Feature' as const,
+                        geometry: { type: 'Point' as const, coordinates: [f.lon, f.lat] },
+                        properties: f,
+                    }));
+                    const src = map.getSource('flights') as maplibregl.GeoJSONSource;
+                    src.setData({ type: 'FeatureCollection', features });
+                    console.log(`Updated ${features.length} flights`);
+                } catch (err) {
+                    console.error('Flight update failed', err);
+                }
+            };
+
+            updateFlights();
+            const interval = setInterval(updateFlights, 15000);
+            map.once('remove', () => clearInterval(interval));
+            const popup = new maplibregl.Popup({
+                closeButton: false,
+                closeOnClick: false,
+            });
+
+            map.on('mouseenter', 'flights-layer', (e) => {
+                map.getCanvas().style.cursor = 'pointer';
+                const f = e.features?.[0];
+                if (!f) return;
+                const p = f.properties as {
+                    callsign?: string;
+                    country?: string;
+                    altitude?: number;
+                    velocity?: number;
+                };
+                const html = `
+                    <div style="font-family: system-ui; font-size: 12px; line-height: 1.4;">
+                      <div style="font-weight: 600; font-size: 13px;">${p.callsign || 'unknown'}</div>
+                      <div style="color: #666;">${p.country || ''}</div>
+                      <div style="margin-top: 4px;">
+                        ${p.altitude ? Math.round(p.altitude) + ' m' : '—'}
+                        ${p.velocity ? ' · ' + Math.round(p.velocity * 3.6) + ' km/h' : ''}
+                      </div>
+                    </div>
+                  `;
+                const coords = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+                popup.setLngLat(coords).setHTML(html).addTo(map);
+            });
+
+            map.on('mouseleave', 'flights-layer', () => {
+                map.getCanvas().style.cursor = '';
+                popup.remove();
+            });
         });
 
         mapRef.current = map;
