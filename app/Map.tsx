@@ -14,7 +14,7 @@ export default function Map() {
 
         const map = new maplibregl.Map({
             container: containerRef.current,
-            style: 'https://tiles.openfreemap.org/styles/liberty',
+            style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
             center: [0, 20],
             zoom: 1.5,
         });
@@ -33,9 +33,9 @@ export default function Map() {
                 source: 'flights',
                 paint: {
                     'circle-radius': 3,
-                    'circle-color': '#ff6b35',
+                    'circle-color': '#fbbf24',          // amber, pops on dark
                     'circle-stroke-width': 0.5,
-                    'circle-stroke-color': '#fff',
+                    'circle-stroke-color': '#1f2937',
                 },
             });
 
