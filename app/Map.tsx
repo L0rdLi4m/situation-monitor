@@ -65,6 +65,64 @@ export default function Map() {
                 closeOnClick: false,
             });
 
+            // Earthquakes layer
+            map.addSource('earthquakes', {
+                type: 'geojson',
+                data: { type: 'FeatureCollection', features: [] },
+            });
+
+            map.addLayer({
+                id: 'earthquakes-layer',
+                type: 'circle',
+                source: 'earthquakes',
+                paint: {
+                    // Radius scales with magnitude (bigger = bigger)
+                    'circle-radius': [
+                        'interpolate', ['linear'], ['get', 'magnitude'],
+                        2.5, 3,
+                        5, 8,
+                        7, 18,
+                        9, 30,
+                    ],
+                    // Color goes from yellow → red → purple as magnitude rises
+                    'circle-color': [
+                        'interpolate', ['linear'], ['get', 'magnitude'],
+                        2.5, '#fef08a',
+                        4, '#fb923c',
+                        5.5, '#ef4444',
+                        7, '#a21caf',
+                    ],
+                    'circle-opacity': 0.6,
+                    'circle-stroke-width': 1,
+                    'circle-stroke-color': '#fff',
+                    'circle-stroke-opacity': 0.4,
+                },
+            });
+
+            const updateEarthquakes = async () => {
+                try {
+                    const res = await fetch('/api/earthquakes');
+                    const { earthquakes } = await res.json();
+                    const features = earthquakes.map((eq: {
+                        lon: number; lat: number; [k: string]: unknown;
+                    }) => ({
+                        type: 'Feature' as const,
+                        geometry: { type: 'Point' as const, coordinates: [eq.lon, eq.lat] },
+                        properties: eq,
+                    }));
+                    const src = map.getSource('earthquakes') as maplibregl.GeoJSONSource;
+                    src.setData({ type: 'FeatureCollection', features });
+                    console.log(`Updated ${features.length} earthquakes`);
+                } catch (err) {
+                    console.error('Earthquake update failed', err);
+                }
+            };
+
+            updateEarthquakes();
+            // USGS updates every minute, but every 5 min is plenty for the map
+            const eqInterval = setInterval(updateEarthquakes, 5 * 60 * 1000);
+            map.once('remove', () => clearInterval(eqInterval));
+
             map.on('mouseenter', 'flights-layer', (e) => {
                 map.getCanvas().style.cursor = 'pointer';
                 const f = e.features?.[0];
@@ -90,6 +148,38 @@ export default function Map() {
             });
 
             map.on('mouseleave', 'flights-layer', () => {
+                map.getCanvas().style.cursor = '';
+                popup.remove();
+            });
+
+            map.on('mouseenter', 'earthquakes-layer', (e) => {
+                map.getCanvas().style.cursor = 'pointer';
+                const f = e.features?.[0];
+                if (!f) return;
+                const p = f.properties as {
+                    magnitude: number;
+                    place?: string;
+                    time: number;
+                    depth?: number;
+                };
+                const when = new Date(p.time).toLocaleString();
+                const html = `
+                    <div style="font-family: system-ui; font-size: 12px; line-height: 1.4;">
+                      <div style="font-weight: 600; font-size: 14px;">
+                        M${p.magnitude.toFixed(1)} earthquake
+                      </div>
+                      <div style="color: #666;">${p.place || ''}</div>
+                      <div style="margin-top: 4px;">
+                        ${p.depth != null ? Math.round(p.depth) + ' km deep' : ''}
+                      </div>
+                      <div style="color: #999; font-size: 11px; margin-top: 2px;">${when}</div>
+                    </div>
+                  `;
+                const coords = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+                popup.setLngLat(coords).setHTML(html).addTo(map);
+            });
+
+            map.on('mouseleave', 'earthquakes-layer', () => {
                 map.getCanvas().style.cursor = '';
                 popup.remove();
             });
