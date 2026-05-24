@@ -116,6 +116,25 @@ export default function Map() {
             >
                 {isGlobe ? '🗺 Flat' : '🌍 Globe'}
             </button>
+            <div className="absolute bottom-4 left-4 bg-black/60 text-white text-xs px-3 py-2 rounded max-w-xs">
+                <div className="font-semibold mb-1">Flight coverage</div>
+                <div className="text-gray-300">
+                    ADS-B ground receivers via adsb.lol. Oceanic and remote regions
+                    have limited coverage.
+                </div>
+            </div>
+        </div>
+    );
+
+    return (
+        <div className="relative h-screen w-screen">
+            <div ref={containerRef} className="h-full w-full" />
+            <button
+                onClick={() => setIsGlobe(!isGlobe)}
+                className="absolute top-4 right-4 bg-white px-3 py-2 rounded shadow-md text-sm font-medium hover:bg-gray-100"
+            >
+                {isGlobe ? '🗺 Flat' : '🌍 Globe'}
+            </button>
         </div>
     );
 }
