@@ -1,3 +1,4 @@
+export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 type State = [
@@ -6,14 +7,17 @@ type State = [
         number | null, number | null, ...unknown[]
 ];
 
-export async function GET() {
+export async function GET(request: Request) {
+    void request.url;
+
     try {
         const res = await fetch('https://opensky-network.org/api/states/all', {
             signal: AbortSignal.timeout(8000),
+            cache: 'no-store',
         });
 
         if (!res.ok) {
-            return Response.json({ error: 'OpenSky unavailable', flights: [] }, { status: 502 });
+            return Response.json({ flights: [], error: 'OpenSky unavailable' }, { status: 200 });
         }
 
         const data = await res.json();
@@ -33,7 +37,6 @@ export async function GET() {
 
         return Response.json({ flights, time: data.time });
     } catch (err) {
-        console.error('OpenSky fetch failed', err);
-        return Response.json({ error: 'fetch failed', flights: [] }, { status: 502 });
+        return Response.json({ flights: [], error: String(err) }, { status: 200 });
     }
 }
